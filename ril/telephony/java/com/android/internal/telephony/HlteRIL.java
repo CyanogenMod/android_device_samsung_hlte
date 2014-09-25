@@ -27,17 +27,13 @@ import android.os.AsyncResult;
 import android.os.Message;
 import android.os.Parcel;
 import android.telephony.PhoneNumberUtils;
-
-import com.android.internal.telephony.RILConstants;
+import android.telephony.SignalStrength;
 import com.android.internal.telephony.dataconnection.DataCallResponse;
 import com.android.internal.telephony.dataconnection.DcFailCause;
 import com.android.internal.telephony.uicc.IccCardApplicationStatus;
 import com.android.internal.telephony.uicc.IccCardStatus;
-
 import java.util.ArrayList;
 import java.util.Collections;
-
-import android.telephony.SignalStrength;
 
 /**
  * RIL customization for Note 3 LTE devices
@@ -46,23 +42,28 @@ import android.telephony.SignalStrength;
  */
 public class HlteRIL extends RIL implements CommandsInterface {
 
-    boolean RILJ_LOGV = true;
-    boolean RILJ_LOGD = true;
+    private static final int RIL_REQUEST_DIAL_EMERGENCY = 10016;
 
     public HlteRIL(Context context, int networkMode, int cdmaSubscription) {
         super(context, networkMode, cdmaSubscription);
         mQANElements = 6;
     }
 
+    @Override
     public void
     dial(String address, int clirMode, UUSInfo uusInfo, Message result) {
+        if (PhoneNumberUtils.isEmergencyNumber(address)) {
+            dialEmergencyCall(address, clirMode, result);
+            return;
+        }
+
         RILRequest rr = RILRequest.obtain(RIL_REQUEST_DIAL, result);
 
         rr.mParcel.writeString(address);
         rr.mParcel.writeInt(clirMode);
-        rr.mParcel.writeInt(0);
-        rr.mParcel.writeInt(1);         // Added for us, not in RIL.java
-        rr.mParcel.writeString("");     // Added for us, not in RIL.java
+        rr.mParcel.writeInt(0);         // CallDetails.call_type
+        rr.mParcel.writeInt(1);         // CallDetails.call_domain
+        rr.mParcel.writeString("");     // CallDetails.getCsvFromExtras
 
         if (uusInfo == null) {
             rr.mParcel.writeInt(0); // UUS information is absent
@@ -109,17 +110,18 @@ public class HlteRIL extends RIL implements CommandsInterface {
             appStatus.pin1           = appStatus.PinStateFromRILInt(p.readInt());
             appStatus.pin2           = appStatus.PinStateFromRILInt(p.readInt());
             // All subsequent readInt()s added for our device
-            p.readInt(); // remaining_count_pin1 - pin1_num_retries
-            p.readInt(); // remaining_count_puk1 - puk1_num_retries
-            p.readInt(); // remaining_count_pin2 - pin2_num_retries
-            p.readInt(); // remaining_count_puk2 - puk2_num_retries
-            p.readInt(); // - perso_unblock_retries
+            p.readInt(); // pin1_num_retries
+            p.readInt(); // puk1_num_retries
+            p.readInt(); // pin2_num_retries
+            p.readInt(); // puk2_num_retries
+            p.readInt(); // perso_unblock_retries
 
             cardStatus.mApplications[i] = appStatus;
         }
         return cardStatus;
     }
 
+    @Override
     protected Object
     responseCallList(Parcel p) {
         int num;
@@ -146,13 +148,12 @@ public class HlteRIL extends RIL implements CommandsInterface {
             dc.isMT = (0 != p.readInt());
             dc.als = p.readInt();
             voiceSettings = p.readInt();
-            dc.isVoice = (0 == voiceSettings) ? false : true;
-            p.readInt();  // Added for us, not in RIL.java
+            dc.isVoice = (0 != voiceSettings);
+            boolean isVideo = (0 != p.readInt());
+            int call_type = p.readInt();            // Samsung CallDetails
+            int call_domain = p.readInt();          // Samsung CallDetails
+            String csv = p.readString();            // Samsung CallDetails
             dc.isVoicePrivacy = (0 != p.readInt());
-            p.readInt();  // Added by us, not sure if we're in the right place
-            p.readInt();  // Added by us, not sure if we're in the right place
-            p.readInt();  // Added by us, not sure if we're in the right place
-            p.readInt();  // Added by us, not sure if we're in the right place
             dc.number = p.readString();
             int np = p.readInt();
             dc.numberPresentation = DriverCall.presentationFromCLIP(np);
@@ -204,36 +205,45 @@ public class HlteRIL extends RIL implements CommandsInterface {
     }
 
     @Override
-    protected Object responseSignalStrength(Parcel p) {
-        int numInts = 12;
-        int response[];
+    protected Object
+    responseSignalStrength(Parcel p) {
+        int gsmSignalStrength = p.readInt() & 0xff;
+        int gsmBitErrorRate = p.readInt();
+        int cdmaDbm = p.readInt();
+        int cdmaEcio = p.readInt();
+        int evdoDbm = p.readInt();
+        int evdoEcio = p.readInt();
+        int evdoSnr = p.readInt();
+        int lteSignalStrength = p.readInt();
+        int lteRsrp = p.readInt();
+        int lteRsrq = p.readInt();
+        int lteRssnr = p.readInt();
+        int lteCqi = p.readInt();
+        int tdScdmaRscp = p.readInt();
+        // constructor sets default true, makeSignalStrengthFromRilParcel does not set it
+        boolean isGsm = true;
 
-        response = new int[numInts];
-        for (int i = 0; i < numInts; i++) {
-            response[i] = p.readInt();
+        if ((lteSignalStrength & 0xff) == 255 || lteSignalStrength == 99) {
+            lteSignalStrength = 99;
+            lteRsrp = SignalStrength.INVALID;
+            lteRsrq = SignalStrength.INVALID;
+            lteRssnr = SignalStrength.INVALID;
+            lteCqi = SignalStrength.INVALID;
+        } else {
+            lteSignalStrength &= 0xff;
         }
 
-        response[0] &= 0xff; //gsmDbm
-        response[2] %= 0xff; //cdma
-        response[4] %= 0xff; //cdma
+        if (RILJ_LOGD)
+            riljLog("gsmSignalStrength:" + gsmSignalStrength + " gsmBitErrorRate:" + gsmBitErrorRate +
+                    " cdmaDbm:" + cdmaDbm + " cdmaEcio:" + cdmaEcio + " evdoDbm:" + evdoDbm +
+                    " evdoEcio: " + evdoEcio + " evdoSnr:" + evdoSnr +
+                    " lteSignalStrength:" + lteSignalStrength + " lteRsrp:" + lteRsrp +
+                    " lteRsrq:" + lteRsrq + " lteRssnr:" + lteRssnr + " lteCqi:" + lteCqi +
+                    " tdScdmaRscp:" + tdScdmaRscp + " isGsm:" + (isGsm ? "true" : "false"));
 
-        // RIL_LTE_SignalStrength
-        if ((response[7] & 0xff) == 255 || response[7] == 99) {
-            // If LTE is not enabled, clear LTE results
-            // 7-11 must be -1 for GSM signal strength to be used (see
-            // frameworks/base/telephony/java/android/telephony/SignalStrength.java)
-            // make sure lte is disabled
-            response[7] = 99;
-            response[8] = SignalStrength.INVALID;
-            response[9] = SignalStrength.INVALID;
-            response[10] = SignalStrength.INVALID;
-            response[11] = SignalStrength.INVALID;
-        }else{ // lte is gsm on samsung/qualcomm cdma stack
-            response[7] &= 0xff;
-        }
-
-        return new SignalStrength(response[0], response[1], response[2], response[3], response[4], response[5], response[6], response[7], response[8], response[9], response[10], response[11], (p.readInt() != 0));
-
+        return new SignalStrength(gsmSignalStrength, gsmBitErrorRate, cdmaDbm, cdmaEcio, evdoDbm,
+                evdoEcio, evdoSnr, lteSignalStrength, lteRsrp, lteRsrq, lteRssnr, lteCqi,
+                tdScdmaRscp, isGsm);
     }
 
     @Override
@@ -325,8 +335,7 @@ public class HlteRIL extends RIL implements CommandsInterface {
         return response;
     }
 
-    static final int RIL_REQUEST_DIAL_EMERGENCY = 10016;
-    public void
+    private void
     dialEmergencyCall(String address, int clirMode, Message result) {
         RILRequest rr;
         Rlog.v(RILJ_LOG_TAG, "Emergency dial: " + address);
@@ -334,7 +343,10 @@ public class HlteRIL extends RIL implements CommandsInterface {
         rr = RILRequest.obtain(RIL_REQUEST_DIAL_EMERGENCY, result);
         rr.mParcel.writeString(address + "/");
         rr.mParcel.writeInt(clirMode);
-        rr.mParcel.writeInt(0);  // UUS information is absent
+        rr.mParcel.writeInt(0);        // CallDetails.call_type
+        rr.mParcel.writeInt(3);        // CallDetails.call_domain
+        rr.mParcel.writeString("");    // CallDetails.getCsvFromExtra
+        rr.mParcel.writeInt(0);        // Unknown
 
         if (RILJ_LOGD) riljLog(rr.serialString() + "> " + requestToString(rr.mRequest));
 
