@@ -15,7 +15,7 @@
 # inherit from common hlte
 -include device/samsung/hlte-common/BoardConfigCommon.mk
 
-TARGET_OTA_ASSERT_DEVICE := hltexx,SM-N9005,hlte
+TARGET_OTA_ASSERT_DEVICE := hltexx,SM-N9005,hlte,hlteskt,hltektt,SM-N900S,SM-N900K
 
 # Init
 TARGET_INIT_VENDOR_LIB := libinit_msm
