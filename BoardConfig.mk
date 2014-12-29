@@ -30,8 +30,5 @@ BOARD_USERDATAIMAGE_PARTITION_SIZE := 28651290624
 BOARD_FLASH_BLOCK_SIZE := 131072
 TARGET_USERIMAGES_USE_EXT4 := true
 
-# Ril
-BOARD_RIL_CLASS := ../../../device/samsung/hlte/ril
-
 # inherit from the proprietary version
 -include vendor/samsung/hlte/BoardConfigVendor.mk
