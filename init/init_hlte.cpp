@@ -36,6 +36,12 @@
 
 #include "init_msm.h"
 
+void gsm_properties()
+{
+    property_set("ro.telephony.default_network", "9");
+    property_set("telephony.lteOnGsmDevice", "1");
+}
+
 void init_msm_properties(unsigned long msm_id, unsigned long msm_ver, char *board_type)
 {
     char platform[PROP_VALUE_MAX];
@@ -54,7 +60,6 @@ void init_msm_properties(unsigned long msm_id, unsigned long msm_ver, char *boar
 
     property_get("ro.bootloader", bootloader);
 
-    gsm_properties();
     if (strstr(bootloader, "N900S")) {
         /* hlteskt */
         property_set("ro.build.fingerprint", "samsung/hlteskt/hlte:4.4.2/KOT49H/N900SKSUFNH4:user/release-keys");
@@ -78,10 +83,4 @@ void init_msm_properties(unsigned long msm_id, unsigned long msm_ver, char *boar
     property_get("ro.product.device", device);
     strlcpy(devicename, device, sizeof(devicename));
     ERROR("Found bootloader id %s setting build properties for %s device\n", bootloader, devicename);
-}
-
-void gsm_properties()
-{
-    property_set("ro.telephony.default_network", "9");
-    property_set("telephony.lteOnGsmDevice", "1");
 }
